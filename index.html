@@ -193,6 +193,70 @@
     0% { transform: scale(0.4) rotate(-15deg); opacity: 0.5; }
     100% { transform: scale(1) rotate(8deg); opacity: 0.85; }
   }
+
+  #click-zone {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: var(--radius);
+    transition: background 0.1s;
+    user-select: none;
+    margin-bottom: 0.5rem;
+  }
+  #click-zone:hover { background: rgba(255,255,255,0.04); }
+  #click-zone:active { background: rgba(255,255,255,0.08); }
+  #save-status { font-size:11px; color:var(--text-muted); margin-bottom:4px; }
+
+  #buy-bar {
+    width: 100%;
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  #buy-bar button {
+    flex: 1;
+    padding: 8px 4px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  #buy-bar button.active {
+    background: var(--surface2);
+    color: var(--text);
+    border-color: #7a5e3a;
+  }
+  .progress-bars {
+    display: flex;
+    gap: 3px;
+    margin-top: 4px;
+  }
+  .progress-bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+  .progress-bar.filled {
+    background: var(--text-success);
+  }
+  .progress-bar.partial::after {
+    content: '';
+    position: absolute;
+    left: 0; top: 0;
+    height: 100%;
+    background: var(--text-warn);
+    width: var(--fill, 0%);
+  }
 </style>
 </head>
 <body>
@@ -202,12 +266,21 @@
 </header>
 
 <div id="game">
-  <div id="save-status" style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">💾 Sparar automatiskt</div>
-  <div id="score-display">0 skitpoäng</div>
-  <div id="passive-display">0 sp/sek</div>
-  <div id="prestige-display"></div>
-  <div id="cheat-box">🚨 Cheat detekterad! Skit sprids...</div>
-  <button id="poop-btn" aria-label="Klicka på skithögen">💩</button>
+  <div id="click-zone" role="button" tabindex="0" aria-label="Klicka för skitpoäng">
+    <div id="save-status">💾 Sparar automatiskt</div>
+    <div id="score-display">0 skitpoäng</div>
+    <div id="passive-display">0 sp/sek</div>
+    <div id="prestige-display"></div>
+    <div id="cheat-box">🚨 Cheat detekterad! Skit sprids...</div>
+    <div id="poop-btn">💩</div>
+  </div>
+
+  <div id="buy-bar">
+    <button id="buy-1" class="active">1x</button>
+    <button id="buy-10">10x</button>
+    <button id="buy-next">Nästa</button>
+    <button id="buy-max">MAX</button>
+  </div>
 
   <div id="sort-bar">
     <button id="sort-default" class="active">Standard</button>
@@ -223,7 +296,7 @@
 
 <script>
 let score = 0, totalEver = 0, prestigeMult = 1, prestigeLevel = 0;
-let laxUsed = false, sortMode = 'default';
+let laxUsed = false, sortMode = 'default', buyMode = 1;
 let splashes = [], cheatActive = false, cheatTimer = null;
 const clickTimes = [];
 
@@ -273,6 +346,44 @@ function getSorted() {
   return list;
 }
 
+function calcBuyAmount(g) {
+  if (buyMode === 1) return 1;
+  if (buyMode === 10) return 10;
+  if (buyMode === 'max') {
+    let s = score, count = 0, cost = g.cost;
+    while (s >= cost) { s -= cost; cost = Math.ceil(cost * COST_SCALE); count++; }
+    return Math.max(count, 0);
+  }
+  // next milestone
+  const next = nextMilestone(g.count);
+  if (!next) return 1;
+  return Math.max(next - g.count, 1);
+}
+
+function calcBuyCost(g, amount) {
+  let total = 0, cost = g.cost;
+  for (let i = 0; i < amount; i++) { total += cost; cost = Math.ceil(cost * COST_SCALE); }
+  return total;
+}
+
+function progressBarsHTML(g) {
+  const milestones = [25, 50, 75, 100];
+  let html = '<div class="progress-bars">';
+  milestones.forEach((m, i) => {
+    const prev = i === 0 ? 0 : milestones[i-1];
+    if (g.count >= m) {
+      html += '<div class="progress-bar filled"></div>';
+    } else if (g.count > prev) {
+      const pct = Math.round(((g.count - prev) / (m - prev)) * 100);
+      html += `<div class="progress-bar partial" style="--fill:${pct}%"></div>`;
+    } else {
+      html += '<div class="progress-bar"></div>';
+    }
+  });
+  html += '</div>';
+  return html;
+}
+
 function renderUpgrades() {
   const container = document.getElementById('upgrades');
   container.innerHTML = '';
@@ -280,29 +391,35 @@ function renderUpgrades() {
   getSorted().forEach(g => {
     const pps = effectivePps(g);
     const mult = milestoneMultiplier(g.count);
-    const next = nextMilestone(g.count);
     const multBadge = mult > 1 ? `<span class="milestone-badge">x${mult}</span>` : '';
-    const nextHint = next
-      ? `<div class="next-hint">${next - g.count} till x${mult * 2}</div>`
-      : `<div class="next-hint" style="color:var(--text-success)">max dubblat! ✓</div>`;
+    const amount = calcBuyAmount(g);
+    const totalCost = calcBuyCost(g, amount);
+    const canAfford = score >= totalCost && amount > 0;
+    const amountLabel = buyMode === 'max' ? (amount > 0 ? `MAX (${amount})` : 'MAX') : (buyMode === 'next' ? `Nästa (${amount})` : `${amount}x`);
 
     const btn = document.createElement('button');
     btn.className = 'upgrade-btn';
-    btn.disabled = score < g.cost;
+    btn.disabled = !canAfford;
     btn.innerHTML = `
       <div class="upg-left">
         <div class="upg-name">${g.emoji} ${g.name} ${multBadge}</div>
         <div class="upg-pps">${fmt(pps)} sp/sek</div>
+        ${progressBarsHTML(g)}
       </div>
       <div class="upg-right">
-        ${g.count} st<br>${fmt(g.cost)} sp
-        ${nextHint}
+        ${g.count} st<br>
+        <span style="color:var(--text-warn);font-size:11px">${amountLabel}</span><br>
+        ${fmt(totalCost)} sp
       </div>`;
     btn.addEventListener('click', () => {
-      if (score < g.cost) return;
-      score -= g.cost;
-      g.count++;
-      g.cost = Math.ceil(g.cost * COST_SCALE);
+      const amt = calcBuyAmount(g);
+      const cost = calcBuyCost(g, amt);
+      if (score < cost || amt === 0) return;
+      score -= cost;
+      g.count += amt;
+      let c = g.cost;
+      for (let i = 0; i < amt; i++) c = Math.ceil(c * COST_SCALE);
+      g.cost = c;
       updateUI();
     });
     container.appendChild(btn);
@@ -344,6 +461,15 @@ function updateUI() {
   pb.disabled = score < PRESTIGE_COST;
   renderUpgrades();
 }
+
+['buy-1','buy-10','buy-next','buy-max'].forEach(id => {
+  document.getElementById(id).addEventListener('click', () => {
+    buyMode = id === 'buy-1' ? 1 : id === 'buy-10' ? 10 : id === 'buy-next' ? 'next' : 'max';
+    ['buy-1','buy-10','buy-next','buy-max'].forEach(s =>
+      document.getElementById(s).classList.toggle('active', s === id));
+    updateUI();
+  });
+});
 
 ['sort-default', 'sort-price', 'sort-expensive'].forEach(id => {
   document.getElementById(id).addEventListener('click', () => {
@@ -447,7 +573,7 @@ window.addEventListener('beforeunload', saveGame);
 // Ladda sparad data direkt
 loadGame();
 
-document.getElementById('poop-btn').addEventListener('click', (e) => {
+document.getElementById('click-zone').addEventListener('click', (e) => {
   detectCheat();
   const gain = 1 * prestigeMult;
   score += gain;
@@ -486,6 +612,6 @@ setInterval(() => {
 }, 100);
 
 updateUI();
-</script>
+</script>k
 </body>
 </html>
