@@ -238,6 +238,9 @@
     gap: 3px;
     margin-top: 4px;
   }
+  .progress-bars + .progress-bars {
+    margin-top: 3px;
+  }
   .progress-bar {
     flex: 1;
     height: 6px;
@@ -305,7 +308,7 @@ const PRESTIGE_UNLOCK = 10000;
 const PRESTIGE_COST = 10000;
 const PRESTIGE_KEEP = 300;
 const LAX_COST = 10000;
-const MILESTONES = [25, 50, 75, 100];
+const MILESTONES = [25, 50, 75, 100, 125, 150, 175, 200];
 
 const gens = [
   { id:'bean',    emoji:'🫘', name:'Bönglas',      baseCost:10,     basePps:1,    count:0, cost:10 },
@@ -336,7 +339,7 @@ function milestoneMultiplier(count) {
   return mult;
 }
 function effectivePps(g) { return g.basePps * milestoneMultiplier(g.count); }
-function nextMilestone(count) { for (const m of MILESTONES) { if (count < m) return m; } return null; }
+function nextMilestone(count) { for (const m of MILESTONES) { if (count < m) return m; } return null; } // max 200
 function totalPps() { return gens.reduce((s, g) => s + g.count * effectivePps(g), 0) * prestigeMult; }
 
 function getSorted() {
@@ -367,21 +370,30 @@ function calcBuyCost(g, amount) {
 }
 
 function progressBarsHTML(g) {
-  const milestones = [25, 50, 75, 100];
-  let html = '<div class="progress-bars">';
-  milestones.forEach((m, i) => {
-    const prev = i === 0 ? 0 : milestones[i-1];
-    if (g.count >= m) {
-      html += '<div class="progress-bar filled"></div>';
-    } else if (g.count > prev) {
-      const pct = Math.round(((g.count - prev) / (m - prev)) * 100);
-      html += `<div class="progress-bar partial" style="--fill:${pct}%"></div>`;
-    } else {
-      html += '<div class="progress-bar"></div>';
-    }
-  });
-  html += '</div>';
-  return html;
+  const milestones = [25, 50, 75, 100, 125, 150, 175, 200];
+  const row1 = milestones.slice(0, 4);
+  const row2 = milestones.slice(4);
+
+  function rowHTML(rows) {
+    let html = '<div class="progress-bars">';
+    rows.forEach((m, i) => {
+      const allMs = milestones;
+      const idx = allMs.indexOf(m);
+      const prev = idx === 0 ? 0 : allMs[idx - 1];
+      if (g.count >= m) {
+        html += '<div class="progress-bar filled"></div>';
+      } else if (g.count > prev) {
+        const pct = Math.round(((g.count - prev) / (m - prev)) * 100);
+        html += `<div class="progress-bar partial" style="--fill:${pct}%"></div>`;
+      } else {
+        html += '<div class="progress-bar"></div>';
+      }
+    });
+    html += '</div>';
+    return html;
+  }
+
+  return rowHTML(row1) + rowHTML(row2);
 }
 
 function renderUpgrades() {
@@ -391,7 +403,7 @@ function renderUpgrades() {
   getSorted().forEach(g => {
     const pps = effectivePps(g);
     const mult = milestoneMultiplier(g.count);
-    const multBadge = mult > 1 ? `<span class="milestone-badge">x${mult}</span>` : '';
+    const multBadge = mult > 1 ? `<span class="milestone-badge">x${mult}${g.count >= 200 ? ' MAX' : ''}</span>` : '';
     const amount = calcBuyAmount(g);
     const totalCost = calcBuyCost(g, amount);
     const canAfford = score >= totalCost && amount > 0;
@@ -612,6 +624,6 @@ setInterval(() => {
 }, 100);
 
 updateUI();
-</script>k
+</script>
 </body>
 </html>
